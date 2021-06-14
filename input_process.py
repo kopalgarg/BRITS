@@ -4,7 +4,7 @@ import os
 import re
 import numpy as np
 import pandas as pd
-import ujson as json
+import json
 
 patient_ids = []
 
@@ -43,18 +43,31 @@ std = np.array(
 
 fs = open('./json/json', 'w')
 
+# JSON encoder
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(NpEncoder, self).default(obj)
+
 def to_time_bin(x):
     h, m = map(int, x.split(':'))
     return h
 
 
 def parse_data(x):
+    
     x = x.set_index('Parameter').to_dict()['Value']
 
     values = []
 
     for attr in attributes:
-        if x.has_key(attr):
+        if x.get(attr):
             values.append(x[attr])
         else:
             values.append(np.nan)
@@ -78,12 +91,12 @@ def parse_delta(masks, dir_):
 
 def parse_rec(values, masks, evals, eval_masks, dir_):
     deltas = parse_delta(masks, dir_)
-
+    
     # only used in GRU-D
-    forwards = pd.DataFrame(values).fillna(method='ffill').fillna(0.0).as_matrix()
+    forwards = pd.DataFrame(values).fillna(method='ffill').fillna(0.0).values
 
     rec = {}
-
+    
     rec['values'] = np.nan_to_num(values).tolist()
     rec['masks'] = masks.astype('int32').tolist()
     # imputation ground-truth
@@ -99,13 +112,13 @@ def parse_id(id_):
     data = pd.read_csv('./raw/{}.txt'.format(id_))
     # accumulate the records within one hour
     data['Time'] = data['Time'].apply(lambda x: to_time_bin(x))
-
+    
     evals = []
 
     # merge all the metrics within one hour
     for h in range(48):
         evals.append(parse_data(data[data['Time'] == h]))
-
+    #import pdb; pdb.set_trace()
     evals = (np.array(evals) - mean) / std
 
     shp = evals.shape
@@ -136,7 +149,7 @@ def parse_id(id_):
     rec['forward'] = parse_rec(values, masks, evals, eval_masks, dir_='forward')
     rec['backward'] = parse_rec(values[::-1], masks[::-1], evals[::-1], eval_masks[::-1], dir_='backward')
 
-    rec = json.dumps(rec)
+    rec = json.dumps(rec,  cls=NpEncoder)
 
     fs.write(rec + '\n')
 
